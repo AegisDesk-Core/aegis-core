@@ -1,0 +1,8 @@
+{
+  "source": "data.pdf",
+  "fingerprint": "3fd935005cc72a209b979c747142cb2dbc1bba4084a906172a33c63fd636e47a",
+  "tenant_id": "tenant-123",
+  "chunk_size": 700,
+  "chunk_overlap": 100,
+  "embedding": "local:local-hash-384"
+}

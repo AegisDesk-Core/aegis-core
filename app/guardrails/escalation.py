@@ -11,11 +11,13 @@ def escalation(state: SupportState):
     )
 
     state["escalated"] = True
+    state["needs_human"] = True
     state["answer"] = message
     state["sources"] = []
     return {
         "answer": message,
         "escalated": True,
+        "needs_human": True,
         "sources": [],
         "intent": state.get("intent", "other"),
         "confidence": float(state.get("evidence_score", 0.0)),

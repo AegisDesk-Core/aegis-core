@@ -35,7 +35,7 @@ graph.add_edge("classify_intent", "route_intent")
 graph.add_conditional_edges(
     "route_intent",
     lambda state: state.get("intent", "other"),
-    {"refund": "rewrite_query", "shipping": "rewrite_query", "product": "rewrite_query", "other": "escalation"},
+    {"refund": "rewrite_query", "shipping": "rewrite_query", "product": "rewrite_query", "other": "rewrite_query"},
 )
 graph.add_edge("rewrite_query", "retrieve")
 graph.add_edge("retrieve", "rerank")

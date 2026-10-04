@@ -1,159 +1,204 @@
 # AI Customer Support Agent
 
-This project is a customer support assistant built with Python, FastAPI, LangGraph, and retrieval-augmented generation (RAG). It is designed to answer customer support questions using company policy documents, validate the answer against evidence, and escalate when the information is missing or unsafe.
+A tenant-aware customer support assistant built with Python, FastAPI, LangGraph, RAG, and a Next.js frontend. The app answers support questions using indexed policy documents, validates the response against retrieved evidence, and escalates when the answer is unsupported or unsafe.
 
-## Project goal
+## Overview
 
-The system helps support teams answer questions like:
+This project combines:
+
+- a Python backend API with validation and tenancy checks
+- a LangGraph orchestration workflow for routing and grounding
+- a FAISS-based retrieval layer over local knowledge documents
+- a guardrail pipeline for hallucination prevention and escalation
+- a Next.js frontend for interactive support chat
+
+It is designed to help support teams answer questions such as:
 
 - refund and return eligibility
-- shipping or delivery status
-- product specifications and compatibility
-- general policy-based questions from a tenant-specific knowledge base
-
-The workflow is built to avoid hallucinations by checking the retrieved documents before returning an answer.
+- shipping delays or delivery status
+- product compatibility or policy questions
+- general company policy lookup from a tenant-scoped knowledge base
 
 ---
 
-## What has already been done
-
-### 1. FastAPI service
-
-A REST API has been implemented with:
-
-- health endpoint: `/health`
-- support endpoint: `/api/v1/ask`
-- bearer-token authentication for tenant validation
-- request validation for required message and conversation metadata
-
-### 2. LangGraph workflow
-
-The core logic is organized as a LangGraph state workflow with these stages:
-
-- request validation
-- intent classification
-- intent routing
-- query rewriting
-- document retrieval
-- reranking
-- evidence verification
-- answer generation
-- grounding check
-- escalation
-- final response formatting
-
-This workflow is defined in `app/graph/graph.py` and uses the state schema in `app/graph/state.py`.
-
-### 3. Tenant-aware retrieval system
-
-The RAG layer:
-
-- reads PDF documents from the `data/documents` folder
-- splits them into chunks
-- creates or reuses a FAISS vector store for each tenant
-- retrieves the most relevant policy chunks based on the rewritten user query
-- uses a local hashing-based embedding fallback so the project can run without a remote model dependency
-
-This is implemented in `app/rag/rag_main.py`.
-
-### 4. Guardrails and safety checks
-
-The project includes guardrail logic for:
-
-- empty or invalid queries
-- prompt injection attempts
-- unsafe or unsupported requests
-- absence of relevant evidence
-- ungrounded answers that are not supported by the retrieved documents
-- escalation to a human support flow when confidence is low
-
-These checks are in the `app/guardrails` package.
-
-### 5. Intent-based handling
-
-The agent already supports a basic routing structure for:
-
-- `refund`
-- `shipping`
-- `product`
-- `other`
-
-The `app/agents/router.py` module classifies user questions and routes them into the proper support workflow.
-
-### 6. Response generation and formatting
-
-The final answer flow:
-
-- assembles evidence-backed answers
-- stores source references
-- returns a structured JSON payload with answer, intent, confidence, sources, and escalation status
-
-### 7. Basic test coverage
-
-The project includes a simple test suite in `tests/test_graph.py` to validate:
-
-- the state structure is complete
-- the expected workflow nodes exist
-
----
-
-## Project structure
+## Current app structure
 
 ```text
 AI CUSTOMER SUPPOERT/
 ├── app/
 │   ├── agents/
-│   ├── config.py
-│   ├── final_response.py
+│   ├── db/
 │   ├── graph/
 │   ├── guardrails/
-│   ├── llm.py
-│   ├── main.py
 │   ├── prompts/
-│   └── rag/
+│   ├── rag/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── final_response.py
+│   ├── llm.py
+│   └── main.py
 ├── data/
 │   ├── documents/
 │   └── vectorstore/
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   ├── README.md
+│   └── next.config.ts
 ├── tests/
+│   ├── test_graph.py
+│   └── test_rag_cli.py
 ├── main.py
-├── README.md
 ├── requirements.txt
-└── .env.example (if added later)
+├── .env
+├── README.md
+└── .gitignore
 ```
 
 ---
 
-## How the system works
+## What the app does
 
-1. A user sends a query through the API.
-2. The request is validated and checked for prompt injection or invalid content.
-3. The query is classified into an intent category.
-4. The query is rewritten to improve retrieval quality.
-5. Relevant documents are searched from the tenant-specific vector store.
-6. The retrieved documents are reranked by relevance.
-7. The evidence is checked for sufficiency.
-8. A reply is generated only when the answer is supported by the documents.
-9. If grounding is weak or missing, the workflow escalates to a human support response.
+### Backend
+
+The FastAPI service exposes:
+
+- `GET /health` for service health
+- `GET /api/v1/chat/start` for tenant validation and welcome message
+- `POST /api/v1/ask` for processing support questions
+
+The request flow includes:
+
+1. bearer-token authentication for tenant session validation
+2. state creation for the support workflow
+3. intent classification and route selection
+4. retrieval and reranking over the tenant knowledge base
+5. evidence scoring and grounding checks
+6. answer generation with source citations
+7. escalation when the answer is not grounded or needs a human
+
+### LangGraph workflow
+
+The workflow is built in `app/graph/graph.py` and uses the shared state in `app/graph/state.py`.
+
+The main stages include:
+
+- validation
+- intent detection
+- routing
+- query rewriting
+- retrieval
+- reranking
+- evidence verification
+- final answer assembly
+- escalation logic
+
+### RAG and retrieval
+
+The retrieval layer in `app/rag/`:
+
+- loads local knowledge content from `data/documents`
+- builds or reuses a FAISS vector store under `data/vectorstore`
+- retrieves the most relevant policy chunks for a query
+- uses local fallback logic when a remote embedding provider is not available
+
+### Guardrails
+
+Safety checks are implemented under `app/guardrails/` for:
+
+- invalid or empty user requests
+- prompt injection or unsafe input
+- unsupported or low-confidence answers
+- missing evidence
+- escalation to a human support flow
+
+### Frontend
+
+The frontend app in `frontend/` is a Next.js chat interface that:
+
+- connects to the backend API
+- validates the bearer token
+- sends chat history and messages
+- displays answer text and citations
+- allows configuration of backend URL and tenant token
 
 ---
 
-## Setup and run
+## Environment setup
 
-### Install dependencies
+Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Run the app
+Create or update a `.env` file in the project root. The project currently reads environment values via `app/config.py` and `app/db/settings.py`.
 
-```bash
-uvicorn main:app --reload
+Typical environment variables:
+
+```env
+LLM_PROVIDER=google
+LLM_MODEL=gemini-3.5-flash-lite
+GEMINI_API_KEY=your_api_key_here
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customer_support
 ```
 
-Or run it directly from the repository root with the project entrypoint.
+You can also use the OpenAI provider with:
 
-### API example
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_api_key_here
+```
+
+> The backend expects a valid tenant token, and the default demo token configured is `demo-tenant`.
+
+---
+
+## Run the backend
+
+From the project root:
+
+```bash
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+This serves the API at:
+
+- `http://localhost:8000/health`
+- `http://localhost:8000/api/v1/ask`
+
+---
+
+## Run the frontend
+
+Open a new terminal, then start the UI:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will run at:
+
+- `http://localhost:3000`
+
+In the UI, set the backend URL to:
+
+```text
+http://localhost:8000
+```
+
+and use the token:
+
+```text
+demo-tenant
+```
+
+---
+
+## API example
 
 Example request:
 
@@ -166,54 +211,59 @@ Content-Type: application/json
 ```json
 {
   "message": "Can I return my laptop after 20 days?",
-  "conversation_id": "conv_123"
+  "conversation_id": "conv_123",
+  "history": [
+    {"role": "assistant", "content": "What is your question or problem today? I am here to help."}
+  ]
+}
+```
+
+Example response shape:
+
+```json
+{
+  "answer": "You are eligible for a return within 30 days...",
+  "intent": "refund",
+  "confidence": 0.91,
+  "citations": [
+    {"filename": "returns_policy.pdf", "page": 3, "excerpt": "Returns are accepted within 30 days..."}
+  ],
+  "sources": ["returns_policy.pdf"],
+  "needs_human": false,
+  "escalated": false
 }
 ```
 
 ---
 
-## What will be done in the future
+## Testing
 
-### Short-term improvements
+Run the Python test suite from the repository root:
 
-- improve the intent classifier with stronger LLM-based routing
-- add a more robust query rewriter using the actual retrieved evidence
-- add a dedicated `answer generation` model flow with structured validation
-- enhance reranking logic and scoring for better retrieval precision
-- add richer logging and request tracing for debugging support flows
+```bash
+pytest
+```
 
-### Medium-term improvements
-
-- add persistent conversation memory and session history
-- support multiple tenants with cleaner isolation and permissions
-- add a frontend dashboard or admin console for support teams
-- store API usage, escalation outcomes, and answer quality metrics
-- improve document ingestion for more file formats and updated company policies
-
-### Long-term goals
-
-- integrate a production-grade LLM provider with safer evaluation and cost controls
-- add human-in-the-loop escalation workflows and ticket creation
-- deploy the system in Docker/Kubernetes with monitoring and CI/CD
-- add metrics, alerts, and quality evaluation for answer reliability
-- expand support to multilingual user requests and more complex support cases
-
----
-
-## Current status
-
-This project is already working as a functional prototype for a grounded customer support assistant. It demonstrates the key pattern of:
-
-- document-based retrieval
-- LangGraph orchestration
-- evidence-based answer generation
-- guardrail enforcement
-- tenant-aware support handling
-
-It is a strong foundation for a production-ready customer support AI system, with the next steps focused on quality, reliability, monitoring, and operational deployment.
+This project includes graph and RAG-related checks under `tests/`.
 
 ---
 
 ## Notes
 
-The project currently uses a local deterministic embedding strategy and FAISS for offline retrieval, which makes it easier to run in local environments without external API dependencies. Future work can add more advanced embedding providers and stronger production monitoring when the system is ready for wider deployment.
+- The backend is a working prototype for grounded customer support.
+- Retrieval is designed to be local-first, with FAISS-backed document search.
+- The frontend is intentionally separate from the backend so the API and UI can be developed and deployed independently.
+- The app is structured as a good starting point for a production-ready support assistant, with further work in monitoring, authentication, and stronger model evaluation.
+
+---
+
+## Future improvements
+
+Possible next steps include:
+
+- stronger multi-tenant isolation and configuration
+- improved intent routing and answer validation
+- more robust document ingestion and indexing
+- persistent conversation memory and analytics
+- deployment packaging with Docker and CI/CD
+- richer observability and error tracing

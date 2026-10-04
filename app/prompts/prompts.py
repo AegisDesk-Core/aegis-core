@@ -35,14 +35,23 @@ Evidence:
 JSON:"""
 
 ANSWER_GENERATOR_PROMPT = """Answer only from verified company evidence.
-Never invent policies, fees, dates, shipping times, product specs, pricing, availability, or eligibility.
-If the evidence is insufficient, do not guess.
-Keep the answer concise, helpful, and grounded in the documented policy.
+You are a professional customer-support agent. Use the conversation to understand
+follow-up questions, but treat the evidence below as the only source of truth.
+Never invent policies, fees, dates, shipping times, product specs, pricing,
+availability, or eligibility. Refuse unsupported answers by setting needs_human
+to true and keeping the answer brief. Keep the answer under 120 words.
+
+Every factual claim must be marked supported=true and cite at least one exact
+document/page from the evidence. Return citations only for the source references
+provided below. If the evidence is contradictory or incomplete, set needs_human
+to true. Return the required structured schema, including claims for validation.
 
 Query:
 {query}
 Intent:
 {intent}
+Conversation history:
+{conversation_history}
 Evidence:
 {evidence}
 

@@ -1,6 +1,9 @@
 from app.graph.state import SupportState
 
 
+MIN_EVIDENCE_SCORE = 0.25
+
+
 def check_evidence(state: SupportState):
     docs = state.get("reranked_docs") or state.get("retrieved_docs") or []
     if not docs:
@@ -22,7 +25,7 @@ def check_evidence(state: SupportState):
             score = float(item.get("score", 0.0))
             evidence_score = max(evidence_score, score)
 
-    if evidence_score < 0.45:
+    if evidence_score < MIN_EVIDENCE_SCORE:
         state["evidence"] = evidence_text
         state["evidence_score"] = evidence_score
         state["evidence_reason"] = "Retrieved documents were not specific or directly relevant enough to answer safely."

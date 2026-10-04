@@ -5,6 +5,7 @@ class SupportState(TypedDict):
     query: str
     tenant_id: str
     conversation_id: str
+    conversation_history: list
 
     intent: str
     rewritten_query: str
@@ -19,6 +20,9 @@ class SupportState(TypedDict):
 
     answer: str
     sources: list
+    citations: list
+    confidence: float
+    needs_human: bool
 
     grounded: bool
     escalated: bool

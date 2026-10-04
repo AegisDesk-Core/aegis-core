@@ -8,11 +8,13 @@ def classify_intent(state: SupportState):
 
     refund_keywords = [
         "refund", "return", "cancel", "cancellation", "damaged", "wrong product",
-        "wrong item", "return window", "eligible", "refund amount", "send it back"
+        "wrong item", "return window", "eligible", "refund amount", "send it back",
+        "replace", "replacement", "not working", "broken", "defective"
     ]
     shipping_keywords = [
         "shipping", "delivery", "track", "tracking", "ship", "arrive", "delay",
-        "shipment", "courier", "delivery date", "where is my order"
+        "shipment", "courier", "delivery date", "where is my order",
+        "home", "how many days", "how long", "reach me", "deliver"
     ]
     product_keywords = [
         "product", "specification", "feature", "features", "compatibility", "dimensions",
@@ -35,9 +37,8 @@ def classify_intent(state: SupportState):
 
 def route_intent(state: SupportState):
     intent = state.get("intent", "other")
-    if intent not in {"refund", "shipping", "product"}:
+    if intent not in {"refund", "shipping", "product", "other"}:
         intent = "other"
-        state["escalated"] = True
     state["intent"] = intent
     return {"intent": intent}
 

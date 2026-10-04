@@ -14,7 +14,6 @@ def rewrite_query(state: SupportState):
     if not cleaned:
         cleaned = "support policy"
 
-    rewritten = f"{intent} {cleaned} policy eligibility conditions" if intent in {"refund", "shipping", "product"} else cleaned
     prompt = QUERY_REWRITER_PROMPT.format(query=query, intent=intent)
-    state["rewritten_query"] = rewritten
-    return {"rewritten_query": rewritten, "prompt": prompt}
+    state["rewritten_query"] = cleaned
+    return {"rewritten_query": cleaned, "prompt": prompt}

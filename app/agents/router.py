@@ -1,5 +1,22 @@
+import re
+
 from app.graph.state import SupportState
 from app.prompts.prompts import INTENT_CLASSIFIER_PROMPT
+
+
+INTRODUCTION_PATTERN = re.compile(
+    r"\b(?:i['’]?m|i am|my name is|this is)\s+([a-z][a-z'-]{0,39})\b",
+    re.IGNORECASE,
+)
+CAPABILITY_QUESTION_PATTERN = re.compile(
+    r"\bhow can (?:you|this assistant) help\b|\bwhat can (?:you|this assistant) help\b",
+    re.IGNORECASE,
+)
+GREETING_PATTERN = re.compile(
+    r"^\s*(?:(?:hi|hello|hey|good morning|good afternoon|good evening)"
+    r"\b[\s,.!'-]*)+$",
+    re.IGNORECASE,
+)
 
 
 def classify_intent(state: SupportState):
@@ -28,6 +45,12 @@ def classify_intent(state: SupportState):
                 score[key] += 1
 
     intent = max(score, key=score.get) if any(score.values()) else "other"
+    if not any(score.values()) and (
+        INTRODUCTION_PATTERN.search(query)
+        or GREETING_PATTERN.fullmatch(query)
+        or CAPABILITY_QUESTION_PATTERN.search(query)
+    ):
+        intent = "small_talk"
     if intent == "other" and score["refund"] == score["shipping"] == score["product"] == 0:
         intent = "other"
 
@@ -37,10 +60,45 @@ def classify_intent(state: SupportState):
 
 def route_intent(state: SupportState):
     intent = state.get("intent", "other")
-    if intent not in {"refund", "shipping", "product", "other"}:
+    if intent not in {"refund", "shipping", "product", "other", "small_talk"}:
         intent = "other"
     state["intent"] = intent
     return {"intent": intent}
+
+
+def respond_to_small_talk(state: SupportState):
+    query = state.get("query", "")
+    introduction = INTRODUCTION_PATTERN.search(query)
+    name = introduction.group(1).strip().capitalize() if introduction else None
+    greeting = f"Hi, {name}! Nice to meet you." if name else "Hi! Nice to meet you."
+    answer = (
+        f"{greeting} I can help you understand our return and refund policies, "
+        "shipping and delivery information, and product details such as features "
+        "or compatibility. I answer from the company information available to me, "
+        "and I can flag questions for a support representative when that information "
+        "does not cover what you need. I do not have access to live order or account "
+        "details unless they are provided here. What would you like help with?"
+    )
+    state.update({
+        "answer": answer,
+        "intent": "small_talk",
+        "confidence": 1.0,
+        "needs_human": False,
+        "grounded": True,
+        "escalated": False,
+        "citations": [],
+        "sources": [],
+    })
+    return {
+        "answer": answer,
+        "intent": "small_talk",
+        "confidence": 1.0,
+        "needs_human": False,
+        "grounded": True,
+        "escalated": False,
+        "citations": [],
+        "sources": [],
+    }
 
 
 def check_grounding(state: SupportState):

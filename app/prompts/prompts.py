@@ -10,6 +10,7 @@ Category:"""
 
 QUERY_REWRITER_PROMPT = """Rewrite the customer message into a short, retrieval-friendly search query.
 Preserve meaning and product names, dates, and conditions.
+Use recent conversation context to resolve references such as "it" or "that".
 Do not invent facts, do not answer the question, and do not add policy details.
 Return only the rewritten query.
 
@@ -17,6 +18,8 @@ Customer message:
 {query}
 Intent:
 {intent}
+Recent conversation:
+{conversation_history}
 
 Rewritten query:"""
 
@@ -44,7 +47,8 @@ to true and keeping the answer brief. Keep the answer under 120 words.
 Every factual claim must be marked supported=true and cite at least one exact
 document/page from the evidence. Return citations only for the source references
 provided below. If the evidence is contradictory or incomplete, set needs_human
-to true. Return the required structured schema, including claims for validation.
+to true. Always include at least one response citation and at least one claim.
+Do not leave citations or claims empty. Return the required structured schema.
 
 Query:
 {query}

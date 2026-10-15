@@ -21,6 +21,9 @@ except Exception:  # pragma: no cover - fallback for missing optional dependency
     ChatOpenAI = None
 
 
+DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite"
+
+
 class _FallbackModel:
     def __init__(self, name: str):
         self.name = name
@@ -38,7 +41,8 @@ if ChatGoogleGenerativeAI is not None:
     try:
         from app.config import get_env
         api_key = get_env("GEMINI_API_KEY")
-        chatModel = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite", api_key=api_key) if api_key else _FallbackModel("gemini-fallback")
+        model_name = get_env("LLM_MODEL") or DEFAULT_GOOGLE_MODEL
+        chatModel = ChatGoogleGenerativeAI(model=model_name, api_key=api_key) if api_key else _FallbackModel("gemini-fallback")
     except Exception:
         chatModel = _FallbackModel("gemini-fallback")
 else:
@@ -56,15 +60,15 @@ class Citation(BaseModel):
 class SupportedClaim(BaseModel):
     claim: str = Field(..., min_length=1)
     supported: bool
-    citations: list[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(..., min_length=1)
 
 
 class AnswerResponse(BaseModel):
     answer: str = Field(..., min_length=1, max_length=1200)
     confidence: float = Field(..., ge=0.0, le=1.0)
-    citations: list[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(..., min_length=1)
     needs_human: bool = False
-    claims: list[SupportedClaim] = Field(default_factory=list)
+    claims: list[SupportedClaim] = Field(..., min_length=1)
 
 
 class _GoogleAnswerModel:
@@ -79,12 +83,18 @@ class _GoogleAnswerModel:
             model=self.model_name,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=AnswerResponse.model_json_schema(),
+                response_schema=AnswerResponse,
                 max_output_tokens=2000,
             ),
         )
         response = chat.send_message(prompt)
-        return AnswerResponse.model_validate(json.loads(response.text))
+        if isinstance(response.parsed, AnswerResponse):
+            return response.parsed
+        if response.parsed is not None:
+            return AnswerResponse.model_validate(response.parsed)
+        if response.text:
+            return AnswerResponse.model_validate(json.loads(response.text))
+        raise ValueError("Google returned no parsed answer or response text.")
 
 
 def get_answer_model():
@@ -98,7 +108,7 @@ def get_answer_model():
         api_key = get_env("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is required for the Google provider.")
-        return _GoogleAnswerModel(model_name or "gemini-3.5-flash-lite", api_key)
+        return _GoogleAnswerModel(model_name or DEFAULT_GOOGLE_MODEL, api_key)
     elif provider == "openai":
         if ChatOpenAI is None:
             raise RuntimeError("Install langchain-openai to use the OpenAI provider.")

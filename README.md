@@ -71,12 +71,20 @@ The FastAPI service exposes:
 The request flow includes:
 
 1. bearer-token authentication for tenant session validation
-2. state creation for the support workflow
-3. intent classification and route selection
-4. retrieval and reranking over the tenant knowledge base
-5. evidence scoring and grounding checks
-6. answer generation with source citations
-7. escalation when the answer is not grounded or needs a human
+2. loading or creating a tenant-owned conversation and saving the customer message
+3. passing the persistent keyword memory and at most 9 recent persisted messages to query rewriting and answer generation
+4. intent classification and route selection
+5. retrieval and reranking over the tenant knowledge base
+6. evidence scoring and grounding checks
+7. answer generation with source citations
+8. saving the assistant response and returning its message ID
+9. escalation when the answer is not grounded or needs a human
+
+Conversation messages remain stored for follow-up context, while the transcript API
+returns only messages from the last 24 hours. The chat UI reloads that visible
+transcript when the customer returns to the same conversation. Older messages are
+not sent as an unlimited prompt history; the model receives the compact keyword
+memory plus at most 9 recent persisted messages, each limited to 1,200 characters.
 
 ### LangGraph workflow
 
@@ -86,11 +94,12 @@ The main stages include:
 
 - validation
 - intent detection
+- direct welcome responses for greetings and customer introductions
 - routing
 - query rewriting
 - retrieval
 - reranking
-- evidence verification
+- evidence and context verification, with unrelated requests flagged for human support
 - final answer assembly
 - escalation logic
 

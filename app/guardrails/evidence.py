@@ -1,7 +1,13 @@
 from app.graph.state import SupportState
+from app.rag.rag_main import _lexical_coverage
 
 
 MIN_EVIDENCE_SCORE = 0.25
+MIN_LEXICAL_COVERAGE = 0.15
+OUT_OF_SCOPE_REASON = (
+    "The request is outside the verified company-support context or has no direct "
+    "match in the available company documents."
+)
 
 
 def check_evidence(state: SupportState):
@@ -20,10 +26,30 @@ def check_evidence(state: SupportState):
     )
 
     evidence_score = 0.0
+    query = state.get("rewritten_query") or state.get("query") or ""
+    lexical_coverage = 0.0
     for item in docs:
         if isinstance(item, dict):
             score = float(item.get("score", 0.0))
             evidence_score = max(evidence_score, score)
+            lexical_coverage = max(
+                lexical_coverage,
+                _lexical_coverage(query, str(item.get("content", ""))),
+            )
+
+    if lexical_coverage < MIN_LEXICAL_COVERAGE:
+        state["evidence"] = evidence_text
+        state["evidence_score"] = evidence_score
+        state["evidence_reason"] = OUT_OF_SCOPE_REASON
+        state["missing_info"] = ["a directly related company support topic"]
+        state["escalated"] = True
+        return {
+            "evidence": evidence_text,
+            "evidence_score": evidence_score,
+            "evidence_reason": OUT_OF_SCOPE_REASON,
+            "missing_info": state["missing_info"],
+            "escalated": True,
+        }
 
     if evidence_score < MIN_EVIDENCE_SCORE:
         state["evidence"] = evidence_text

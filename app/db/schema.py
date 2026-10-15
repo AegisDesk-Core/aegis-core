@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     tenant_id UUID NOT NULL,
     user_id UUID NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
+    memory_keywords TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT conversations_tenant_fk
@@ -62,6 +63,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     CONSTRAINT conversations_status_check
         CHECK (status IN ('active', 'archived', 'deleted'))
 );
+
+ALTER TABLE conversations
+ADD COLUMN IF NOT EXISTS memory_keywords TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

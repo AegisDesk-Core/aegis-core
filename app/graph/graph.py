@@ -1,6 +1,11 @@
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.router import check_grounding, classify_intent, route_intent
+from app.agents.router import (
+    check_grounding,
+    classify_intent,
+    respond_to_small_talk,
+    route_intent,
+)
 from app.final_response import format_response
 from app.graph.answer import generate_answer
 from app.graph.state import SupportState
@@ -16,6 +21,7 @@ graph = StateGraph(SupportState)
 graph.add_node("validate_request", validate_request)
 graph.add_node("classify_intent", classify_intent)
 graph.add_node("route_intent", route_intent)
+graph.add_node("respond_to_small_talk", respond_to_small_talk)
 graph.add_node("rewrite_query", rewrite_query)
 graph.add_node("retrieve", retrieve)
 graph.add_node("rerank", rerank)
@@ -35,8 +41,15 @@ graph.add_edge("classify_intent", "route_intent")
 graph.add_conditional_edges(
     "route_intent",
     lambda state: state.get("intent", "other"),
-    {"refund": "rewrite_query", "shipping": "rewrite_query", "product": "rewrite_query", "other": "rewrite_query"},
+    {
+        "refund": "rewrite_query",
+        "shipping": "rewrite_query",
+        "product": "rewrite_query",
+        "other": "rewrite_query",
+        "small_talk": "respond_to_small_talk",
+    },
 )
+graph.add_edge("respond_to_small_talk", END)
 graph.add_edge("rewrite_query", "retrieve")
 graph.add_edge("retrieve", "rerank")
 graph.add_edge("rerank", "check_evidence")

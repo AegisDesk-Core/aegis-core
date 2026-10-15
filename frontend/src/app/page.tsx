@@ -7,7 +7,13 @@ import { ChatFeed } from "@/components/chat/chat-feed";
 import { Composer } from "@/components/chat/composer";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { AppSettings, ConnectionStatus, Message, KnowledgeDocument } from "@/lib/types";
-import { checkBackendStatus, askQuestion, deleteConversation, DEFAULT_DOCUMENTS } from "@/lib/api";
+import {
+  checkBackendStatus,
+  askQuestion,
+  deleteConversation,
+  getConversationMessages,
+  DEFAULT_DOCUMENTS,
+} from "@/lib/api";
 import { UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
@@ -71,6 +77,41 @@ export default function DocentPage() {
     return () => clearInterval(interval);
   }, [isClient, refreshHealth]);
 
+  React.useEffect(() => {
+    if (!isClient || settings.demoMode || !settings.token || !settings.sessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    getConversationMessages(settings.baseUrl, settings.token, settings.sessionId)
+      .then((history) => {
+        if (!cancelled) {
+          setMessages(
+            history.map((message) => ({
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              timestamp: message.created_at,
+              sources: message.citations.map((citation) => ({
+                filename: citation.filename || citation.document || "source",
+                page: citation.page,
+                excerpt: citation.excerpt || citation.text || "",
+                score: citation.score,
+              })),
+            })),
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load conversation history", error);
+        toast.error("Conversation history could not be loaded");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isClient, settings.baseUrl, settings.demoMode, settings.sessionId, settings.token]);
+
   // Handle saving settings
   const handleSaveSettings = (updated: AppSettings) => {
     setSettings(updated);
@@ -93,7 +134,7 @@ export default function DocentPage() {
   // Handle clear chat
   const handleClearChat = async () => {
     const sessionToDelete = settings.sessionId;
-    if (!sessionToDelete || messages.length === 0) {
+    if (!sessionToDelete) {
       setMessages([]);
       return;
     }
@@ -103,7 +144,7 @@ export default function DocentPage() {
         await deleteConversation(settings.baseUrl, settings.token, sessionToDelete);
       }
       setMessages([]);
-      toast.success("Conversation deleted from the database");
+      toast.success(settings.demoMode ? "Conversation cleared" : "Conversation deleted from the database");
     } catch (error) {
       console.error("Failed to delete conversation", error);
       setMessages([]);
@@ -138,12 +179,11 @@ export default function DocentPage() {
         token: settings.token,
         sessionId: settings.sessionId,
         message: text,
-        history: newHistory.map((m) => ({ role: m.role, content: m.content })),
         demoMode: settings.demoMode,
       });
 
       const assistantMessage: Message = {
-        id: `asst-${Date.now()}`,
+        id: response.response_id,
         role: "assistant",
         content: response.answer,
         sources: response.sources,

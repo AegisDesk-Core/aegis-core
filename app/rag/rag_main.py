@@ -69,6 +69,12 @@ STOP_WORDS = {
     "what", "when", "where", "which", "who", "with", "you", "your",
 }
 QUERY_SYNONYMS = {
+    "return": {"returned", "returning", "returns"},
+    "returned": {"return", "returning", "returns"},
+    "returning": {"return", "returned", "returns"},
+    "returns": {"return", "returned", "returning"},
+    "product": {"products"},
+    "products": {"product"},
     "contact": {"support", "phone", "telephone"},
     "number": {"phone", "telephone"},
     "phone": {"number", "telephone"},

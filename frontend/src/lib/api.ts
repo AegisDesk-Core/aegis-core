@@ -14,13 +14,43 @@ export interface AskParams {
   token: string;
   sessionId: string;
   message: string;
-  history: Array<{ role: string; content: string }>;
   demoMode?: boolean;
 }
 
 export interface AskResponse {
   answer: string;
   sources: Source[];
+  response_id: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  citations: RawSource[];
+}
+
+export async function getConversationMessages(
+  baseUrl: string,
+  token: string,
+  sessionId: string,
+): Promise<ConversationMessage[]> {
+  const cleanUrl = baseUrl.replace(/\/+$/, "");
+  const response = await fetch(
+    `${cleanUrl}/api/v1/conversations/${encodeURIComponent(sessionId)}/messages`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(`GET conversation failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as { messages: ConversationMessage[] };
+  return data.messages;
 }
 
 export async function deleteConversation(baseUrl: string, token: string, sessionId: string): Promise<boolean> {
@@ -30,6 +60,9 @@ export async function deleteConversation(baseUrl: string, token: string, session
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 
+  if (response.status === 404) {
+    return false;
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new Error(detail || `DELETE failed with status ${response.status}`);
@@ -73,10 +106,13 @@ export async function checkBackendStatus(baseUrl: string, token: string): Promis
 
 // Ask question endpoint with live FastAPI request or realistic mock fallback
 export async function askQuestion(params: AskParams): Promise<AskResponse> {
-  const { baseUrl, token, sessionId, message, history, demoMode } = params;
+  const { baseUrl, token, sessionId, message, demoMode } = params;
 
   if (demoMode) {
-    return generateMockResponse(message);
+    return generateMockResponse(message).then((response) => ({
+      ...response,
+      response_id: `demo-${Date.now()}`,
+    }));
   }
 
   const cleanUrl = baseUrl.replace(/\/+$/, "");
@@ -91,7 +127,6 @@ export async function askQuestion(params: AskParams): Promise<AskResponse> {
     body: JSON.stringify({
       message,
       conversation_id: sessionId,
-      history: history.slice(-10)
     })
   });
 
@@ -120,11 +155,11 @@ export async function askQuestion(params: AskParams): Promise<AskResponse> {
     score: s.score
   }));
 
-  return { answer, sources };
+  return { answer, sources, response_id: data.response_id };
 }
 
 // Realistic mock responses for frontend testing and demo
-function generateMockResponse(query: string): Promise<AskResponse> {
+function generateMockResponse(query: string): Promise<Omit<AskResponse, "response_id">> {
   return new Promise((resolve) => {
     setTimeout(() => {
       const q = query.toLowerCase();

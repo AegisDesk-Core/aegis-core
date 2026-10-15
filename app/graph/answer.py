@@ -25,21 +25,29 @@ def _format_evidence(docs: list[dict]) -> tuple[str, set[tuple[str, int]]]:
     return "\n\n".join(blocks), source_keys
 
 
-def _validate_response(response: AnswerResponse, source_keys: set[tuple[str, int]]) -> bool:
+def _response_validation_errors(
+    response: AnswerResponse,
+    source_keys: set[tuple[str, int]],
+) -> list[str]:
+    errors = []
     if response.needs_human or not response.answer.strip():
-        return False
-    if len(response.answer.split()) > MAX_ANSWER_WORDS or not response.citations:
-        return False
+        errors.append("response requested human support or had an empty answer")
+    if len(response.answer.split()) > MAX_ANSWER_WORDS:
+        errors.append("answer exceeds the word limit")
+    if not response.citations:
+        errors.append("response did not cite a source")
     citations = {_source_key(item.document, item.page) for item in response.citations}
     if not citations.issubset(source_keys):
-        return False
+        errors.append("response cited a source not present in retrieved evidence")
     if not response.claims or any(not claim.supported or not claim.citations for claim in response.claims):
-        return False
-    return all(
-        _source_key(citation.document, citation.page) in source_keys
+        errors.append("response claims were missing, unsupported, or uncited")
+    if any(
+        _source_key(citation.document, citation.page) not in source_keys
         for claim in response.claims
         for citation in claim.citations
-    )
+    ):
+        errors.append("a claim cited a source not present in retrieved evidence")
+    return errors
 
 
 def generate_answer(state: SupportState):
@@ -77,10 +85,23 @@ def generate_answer(state: SupportState):
         except Exception:
             logger.exception("Answer model invocation failed on attempt %d", attempt + 1)
             response = None
-        if isinstance(response, AnswerResponse) and _validate_response(response, source_keys):
-            break
+        if isinstance(response, AnswerResponse):
+            validation_errors = _response_validation_errors(response, source_keys)
+            if not validation_errors:
+                break
+            logger.warning(
+                "Answer response failed verification on attempt %d: %s",
+                attempt + 1,
+                "; ".join(validation_errors),
+            )
+        elif response is not None:
+            logger.warning(
+                "Answer model returned unexpected response type on attempt %d: %s",
+                attempt + 1,
+                type(response).__name__,
+            )
 
-    if not isinstance(response, AnswerResponse) or not _validate_response(response, source_keys):
+    if not isinstance(response, AnswerResponse) or _response_validation_errors(response, source_keys):
         answer = "I couldn't verify that from the available company information. Please connect with a support representative."
         state.update({"answer": answer, "grounded": False, "escalated": True, "needs_human": True, "citations": []})
         return {"answer": answer, "grounded": False, "escalated": True, "needs_human": True, "citations": []}

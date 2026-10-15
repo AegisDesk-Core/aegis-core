@@ -9,7 +9,15 @@ from pydantic import BaseModel, Field
 from app.graph.graph import workflow
 from app.graph.state import SupportState
 from app.db.database import close_pool, open_pool
-from app.db.repositories import delete_conversation, save_chat_turn
+from app.db.repositories import delete_conversation
+from app.services.conversation_service import (
+    create_conversation,
+    get_conversation,
+    get_recent_messages,
+    get_visible_messages,
+    save_assistant_response,
+    save_message,
+)
 
 
 @asynccontextmanager
@@ -48,7 +56,6 @@ def database_conversation_id(conversation_id: str, tenant_id: str) -> UUID:
 class AskRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: str = Field(..., min_length=1)
-    history: list[dict[str, str]] = Field(default_factory=list, max_length=10)
 
 
 @app.get("/health")
@@ -99,6 +106,52 @@ async def delete_conversation_endpoint(
     return {"deleted": True, "conversation_id": conversation_id}
 
 
+@app.get("/api/v1/conversations/{conversation_id}/messages")
+async def get_conversation_messages_endpoint(
+    conversation_id: str,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+):
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    token = credentials.credentials.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    tenant_id = TENANT_BY_TOKEN.get(token)
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="Invalid or unknown tenant session.")
+
+    db_conversation_id = database_conversation_id(conversation_id, tenant_id)
+    db_tenant_id = database_tenant_id(tenant_id)
+    try:
+        conversation = get_conversation(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        messages = get_visible_messages(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="The conversation could not be loaded.") from error
+
+    return {
+        "conversation_id": conversation_id,
+        "messages": [
+            {
+                **message,
+                "id": str(message["id"]),
+                "created_at": message["created_at"].isoformat(),
+            }
+            for message in messages
+        ],
+    }
+
+
 @app.post("/api/v1/ask")
 async def ask_support(
     request: AskRequest,
@@ -114,11 +167,52 @@ async def ask_support(
     if tenant_id is None:
         raise HTTPException(status_code=401, detail="Invalid or unknown tenant session.")
 
+    db_conversation_id = database_conversation_id(request.conversation_id, tenant_id)
+    db_tenant_id = database_tenant_id(tenant_id)
+    db_user_id = database_user_id(tenant_id)
+    try:
+        create_conversation(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+            user_id=db_user_id,
+        )
+        user_message_id = save_message(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+            content=request.message,
+        )
+        conversation_history = get_recent_messages(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+            exclude_message_id=user_message_id,
+        )
+        conversation = get_conversation(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+        )
+        if conversation is None:
+            raise LookupError("Conversation not found.")
+        if conversation["memory_keywords"]:
+            conversation_history.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": (
+                        "Persistent conversation keywords: "
+                        f"{conversation['memory_keywords']}"
+                    ),
+                },
+            )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="Conversation ID is already in use.") from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="The customer message could not be saved.") from error
+
     state = SupportState(
         query=request.message,
         tenant_id=tenant_id,
         conversation_id=request.conversation_id,
-        conversation_history=request.history,
+        conversation_history=conversation_history,
         intent="",
         rewritten_query="",
         retrieved_docs=[],
@@ -155,15 +249,12 @@ async def ask_support(
     }
 
     try:
-        save_chat_turn(
-            conversation_id=database_conversation_id(request.conversation_id, tenant_id),
-            tenant_id=database_tenant_id(tenant_id),
-            user_id=database_user_id(tenant_id),
-            user_message=request.message,
-            assistant_message=response["answer"],
+        response_id = save_assistant_response(
+            conversation_id=db_conversation_id,
+            tenant_id=db_tenant_id,
+            content=response["answer"],
             intent=response["intent"],
             confidence=response["confidence"],
-            needs_human=response["needs_human"],
             citations=response["citations"],
         )
     except Exception as error:
@@ -172,4 +263,5 @@ async def ask_support(
             detail="The response was generated but could not be saved.",
         ) from error
 
+    response["response_id"] = str(response_id)
     return response

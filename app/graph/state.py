@@ -1,11 +1,14 @@
-from typing import List, TypedDict
+from typing import List, NotRequired, TypedDict
 
 
 class SupportState(TypedDict):
     query: str
     tenant_id: str
     conversation_id: str
+    request_id: NotRequired[str]
+    user_id: NotRequired[str]
     conversation_history: list
+    llm_latency_ms: NotRequired[float]
 
     intent: str
     rewritten_query: str

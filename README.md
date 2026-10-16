@@ -8,7 +8,7 @@ This project combines:
 
 - a Python backend API with validation and tenancy checks
 - a LangGraph orchestration workflow for routing and grounding
-- a FAISS-based retrieval layer over local knowledge documents
+- a PostgreSQL/pgvector retrieval layer over tenant-scoped knowledge documents
 - a guardrail pipeline for hallucination prevention and escalation
 - a Next.js frontend for interactive support chat
 
@@ -32,6 +32,8 @@ AI CUSTOMER SUPPOERT/
 │   ├── guardrails/
 │   ├── prompts/
 │   ├── rag/
+│   ├── services/
+│   │   └── document_service.py
 │   ├── __init__.py
 │   ├── config.py
 │   ├── final_response.py
@@ -39,7 +41,6 @@ AI CUSTOMER SUPPOERT/
 │   └── main.py
 ├── data/
 │   ├── documents/
-│   └── vectorstore/
 ├── frontend/
 │   ├── src/
 │   ├── public/
@@ -62,11 +63,56 @@ AI CUSTOMER SUPPOERT/
 
 ### Backend
 
-The FastAPI service exposes:
+The FastAPI service exposes `GET /health` and these versioned endpoints:
 
-- `GET /health` for service health
-- `GET /api/v1/chat/start` for tenant validation and welcome message
-- `POST /api/v1/ask` for processing support questions
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `GET` | `/api/v1/chat/start` | Tenant bearer token |
+| `POST` | `/api/v1/ask` | Tenant bearer token |
+| `POST` | `/api/v1/documents` | Tenant bearer token; PDF upload (20 MB maximum) |
+| `GET` | `/api/v1/documents` | Tenant bearer token |
+| `GET` | `/api/v1/documents/{document_id}` | Tenant bearer token |
+| `DELETE` | `/api/v1/documents/{document_id}` | Tenant bearer token |
+| `POST` | `/api/v1/documents/{document_id}/reindex` | Tenant bearer token |
+| `GET` | `/api/v1/conversations` | Tenant bearer token |
+| `GET` | `/api/v1/conversations/{conversation_id}` | Tenant bearer token |
+| `GET` | `/api/v1/conversations/{conversation_id}/messages` | Tenant bearer token |
+| `DELETE` | `/api/v1/conversations/{conversation_id}` | Tenant bearer token |
+| `POST` | `/api/v1/feedback` | Tenant bearer token |
+| `GET` | `/api/v1/admin/metrics` | Admin bearer token (`API_ADMIN_TOKEN`) |
+
+Tenant-scoped document and conversation queries are restricted to the
+authenticated tenant. Document uploads are indexed asynchronously and return
+`202 Accepted` with status `pending`; jobs transition through `processing` to
+`ready`, or to `failed` if indexing fails; deleting a document marks it `deleted`.
+Reindexing returns `202 Accepted` with status `pending`. Poll the document detail
+endpoint to check job progress.
+An already queued or running document cannot be queued for reindexing again.
+
+Dashboard clients can upload a PDF with a multipart `file` field and tenant
+bearer token:
+
+```http
+POST /api/v1/documents
+Authorization: Bearer <tenant-token>
+Content-Type: multipart/form-data
+```
+
+The response includes the document ID, original filename, and current processing
+status:
+
+```json
+{
+  "document_id": "a4f4d992-9981-4aca-a1f9-092b6f46cde1",
+  "filename": "returns-policy.pdf",
+  "status": "pending"
+}
+```
+
+Tenant identity is resolved from the bearer token; a client-supplied
+`tenant_id` is not used.
+Admin metrics are not accessible with tenant tokens; configure a separate,
+high-entropy `API_ADMIN_TOKEN` in the backend environment.
 
 The request flow includes:
 
@@ -105,12 +151,12 @@ The main stages include:
 
 ### RAG and retrieval
 
-The retrieval layer in `app/rag/`:
-
-- loads local knowledge content from `data/documents`
-- builds or reuses a FAISS vector store under `data/vectorstore`
-- retrieves the most relevant policy chunks for a query
-- uses local fallback logic when a remote embedding provider is not available
+Document uploads and indexing are managed by `app/services/document_service.py`.
+It validates and stores tenant uploads, extracts and chunks PDF text, creates
+embeddings, persists chunks and vectors to PostgreSQL/pgvector, and manages job
+status and retries. Retrieval in `app/rag/rag_main.py` filters by authenticated
+tenant and only searches documents with `ready` status. A deterministic local
+embedding provider is used when the configured remote provider is unavailable.
 
 ### Guardrails
 
@@ -161,6 +207,7 @@ OPENAI_API_KEY=your_api_key_here
 ```
 
 > The backend expects a valid tenant token, and the default demo token configured is `demo-tenant`.
+Set `API_ADMIN_TOKEN` to enable the admin metrics endpoint.
 
 ---
 
@@ -257,12 +304,37 @@ This project includes graph and RAG-related checks under `tests/`.
 
 ---
 
+## Monitoring and logging
+
+The backend writes newline-delimited JSON telemetry to stderr. Each HTTP request
+receives a generated `X-Request-ID` response header and a completion event with
+the request ID, tenant/user/conversation IDs when available, intent, retrieval
+count, evidence score, answer and LLM latency, escalation status, HTTP status,
+and error type. Authentication failures (401) and server errors (500) are
+logged as warnings.
+
+Operational events are also emitted for empty retrievals, low evidence scores,
+slow vector searches, slow document processing, and high escalation rates. A
+high-escalation alert uses the latest 1,000 successfully processed chat turns,
+requires at least 10 samples and a rate of 50% or more, and is rate-limited to
+one alert every five minutes. Document processing is considered slow at 5
+seconds; vector searches are considered slow at 500 ms. Override these
+thresholds with `SLOW_DOCUMENT_PROCESSING_MS` and `SLOW_VECTOR_SEARCH_MS`.
+
+Logs are deliberately limited to operational metadata and do not include chat
+messages, answer text, retrieved document content, credentials, or exception
+messages. The escalation-rate window is in process memory; deployments that
+need durable or cross-instance aggregation should forward these JSON events to
+their monitoring platform.
+
+---
+
 ## Notes
 
 - The backend is a working prototype for grounded customer support.
-- Retrieval is designed to be local-first, with FAISS-backed document search.
+- PDF files are stored locally, while document chunks and vectors are stored in PostgreSQL/pgvector.
 - The frontend is intentionally separate from the backend so the API and UI can be developed and deployed independently.
-- The app is structured as a good starting point for a production-ready support assistant, with further work in monitoring, authentication, and stronger model evaluation.
+- The app is structured as a good starting point for a production-ready support assistant, with further work in authentication and stronger model evaluation.
 
 ---
 
@@ -275,4 +347,3 @@ Possible next steps include:
 - more robust document ingestion and indexing
 - persistent conversation memory and analytics
 - deployment packaging with Docker and CI/CD
-- richer observability and error tracing

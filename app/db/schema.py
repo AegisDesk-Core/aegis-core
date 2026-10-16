@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS documents (
     filename VARCHAR(500) NOT NULL,
     storage_path TEXT NOT NULL,
     content_hash VARCHAR(64) NOT NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'processing',
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
     embedding_model VARCHAR(255),
     chunk_size INTEGER,
     chunk_overlap INTEGER,
@@ -121,9 +121,9 @@ CREATE TABLE IF NOT EXISTS documents (
     CONSTRAINT documents_status_check
         CHECK (
             status IN (
+                'pending',
                 'processing',
                 'ready',
-                'completed',
                 'failed',
                 'deleted'
             )
@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS documents (
     CONSTRAINT documents_tenant_hash_unique
         UNIQUE (tenant_id, content_hash)
 );
+
+ALTER TABLE documents ALTER COLUMN status SET DEFAULT 'pending';
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_status_check;
+UPDATE documents SET status = 'ready' WHERE status = 'completed';
+ALTER TABLE documents
+ADD CONSTRAINT documents_status_check
+CHECK (status IN ('pending', 'processing', 'ready', 'failed', 'deleted'));
 
 CREATE TABLE IF NOT EXISTS document_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

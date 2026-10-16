@@ -1,11 +1,12 @@
 import logging
+from time import perf_counter
 
 from app.graph.state import SupportState
 from app.llm import AnswerResponse, get_answer_model
+from app.observability import emit_event
 from app.prompts.prompts import ANSWER_GENERATOR_PROMPT
 
 
-logger = logging.getLogger(__name__)
 MAX_ANSWER_WORDS = 120
 
 
@@ -60,7 +61,12 @@ def generate_answer(state: SupportState):
         state["answer"] = answer
         state["escalated"] = True
         state["needs_human"] = True
-        return {"answer": answer, "escalated": True, "needs_human": True}
+        return {
+            "answer": answer,
+            "escalated": True,
+            "needs_human": True,
+            "llm_latency_ms": 0.0,
+        }
 
     evidence, source_keys = _format_evidence(docs)
     state["evidence"] = evidence
@@ -78,33 +84,68 @@ def generate_answer(state: SupportState):
     )
 
     response = None
+    llm_latency_ms = 0.0
     for attempt in range(2):
+        llm_started_at = perf_counter()
         try:
             retry_instruction = "\nReturn every required field and cite only the labeled evidence. Do not omit claims or citations." if attempt else ""
             response = get_answer_model().invoke(prompt + retry_instruction)
-        except Exception:
-            logger.exception("Answer model invocation failed on attempt %d", attempt + 1)
+        except Exception as error:
+            emit_event(
+                logging.ERROR,
+                "llm_invocation_failed",
+                request_id=state.get("request_id"),
+                tenant_id=state.get("tenant_id"),
+                user_id=state.get("user_id"),
+                conversation_id=state.get("conversation_id"),
+                error_type=type(error).__name__,
+            )
             response = None
+        finally:
+            llm_latency_ms += (perf_counter() - llm_started_at) * 1000
         if isinstance(response, AnswerResponse):
             validation_errors = _response_validation_errors(response, source_keys)
             if not validation_errors:
                 break
-            logger.warning(
-                "Answer response failed verification on attempt %d: %s",
-                attempt + 1,
-                "; ".join(validation_errors),
+            emit_event(
+                logging.WARNING,
+                "llm_response_verification_failed",
+                request_id=state.get("request_id"),
+                tenant_id=state.get("tenant_id"),
+                user_id=state.get("user_id"),
+                conversation_id=state.get("conversation_id"),
+                error_type="AnswerVerificationError",
             )
         elif response is not None:
-            logger.warning(
-                "Answer model returned unexpected response type on attempt %d: %s",
-                attempt + 1,
-                type(response).__name__,
+            emit_event(
+                logging.WARNING,
+                "llm_unexpected_response_type",
+                request_id=state.get("request_id"),
+                tenant_id=state.get("tenant_id"),
+                user_id=state.get("user_id"),
+                conversation_id=state.get("conversation_id"),
+                error_type=type(response).__name__,
             )
+    state["llm_latency_ms"] = round(llm_latency_ms, 2)
 
     if not isinstance(response, AnswerResponse) or _response_validation_errors(response, source_keys):
         answer = "I couldn't verify that from the available company information. Please connect with a support representative."
-        state.update({"answer": answer, "grounded": False, "escalated": True, "needs_human": True, "citations": []})
-        return {"answer": answer, "grounded": False, "escalated": True, "needs_human": True, "citations": []}
+        state.update({
+            "answer": answer,
+            "grounded": False,
+            "escalated": True,
+            "needs_human": True,
+            "citations": [],
+            "llm_latency_ms": round(llm_latency_ms, 2),
+        })
+        return {
+            "answer": answer,
+            "grounded": False,
+            "escalated": True,
+            "needs_human": True,
+            "citations": [],
+            "llm_latency_ms": round(llm_latency_ms, 2),
+        }
 
     citations = [citation.model_dump() for citation in response.citations]
     state.update({
@@ -113,6 +154,7 @@ def generate_answer(state: SupportState):
         "confidence": response.confidence,
         "citations": citations,
         "needs_human": response.needs_human,
+        "llm_latency_ms": round(llm_latency_ms, 2),
     })
     return {
         "answer": response.answer,
@@ -120,4 +162,5 @@ def generate_answer(state: SupportState):
         "confidence": response.confidence,
         "citations": citations,
         "needs_human": response.needs_human,
+        "llm_latency_ms": round(llm_latency_ms, 2),
     }

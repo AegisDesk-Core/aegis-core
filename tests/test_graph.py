@@ -346,6 +346,7 @@ def test_generated_answer_passes_verification_when_sources_match(monkeypatch):
     assert result["answer"] == expected.answer
     assert result["grounded"] is True
     assert result["citations"] == [{"document": "policy.pdf", "page": 1}]
+    assert result["llm_latency_ms"] >= 0
 
 
 def test_google_answer_model_uses_native_structured_response(monkeypatch):

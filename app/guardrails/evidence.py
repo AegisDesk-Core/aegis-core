@@ -1,4 +1,7 @@
+import logging
+
 from app.graph.state import SupportState
+from app.observability import emit_event
 from app.rag.rag_main import _lexical_coverage
 
 
@@ -18,6 +21,18 @@ def check_evidence(state: SupportState):
         state["evidence_reason"] = "No verified company documents were retrieved for this tenant and query."
         state["missing_info"] = ["relevant policy or product documentation"]
         state["escalated"] = True
+        emit_event(
+            logging.WARNING,
+            "low_evidence_score",
+            request_id=state.get("request_id"),
+            tenant_id=state.get("tenant_id"),
+            user_id=state.get("user_id"),
+            conversation_id=state.get("conversation_id"),
+            intent=state.get("intent"),
+            retrieval_count=0,
+            evidence_score=0.0,
+            escalated=True,
+        )
         return {"evidence": "", "evidence_score": 0.0, "evidence_reason": state["evidence_reason"], "missing_info": state["missing_info"], "escalated": True}
 
     evidence_text = "\n\n".join(
@@ -36,6 +51,20 @@ def check_evidence(state: SupportState):
                 lexical_coverage,
                 _lexical_coverage(query, str(item.get("content", ""))),
             )
+
+    if evidence_score < MIN_EVIDENCE_SCORE:
+        emit_event(
+            logging.WARNING,
+            "low_evidence_score",
+            request_id=state.get("request_id"),
+            tenant_id=state.get("tenant_id"),
+            user_id=state.get("user_id"),
+            conversation_id=state.get("conversation_id"),
+            intent=state.get("intent"),
+            retrieval_count=len(docs),
+            evidence_score=evidence_score,
+            escalated=True,
+        )
 
     if lexical_coverage < MIN_LEXICAL_COVERAGE:
         state["evidence"] = evidence_text
